@@ -11,9 +11,11 @@ import org.springframework.security.config.annotation.authentication.configurati
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
 import org.springframework.security.config.annotation.web.configurers.AbstractHttpConfigurer;
+import org.springframework.security.config.http.SessionCreationPolicy;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.web.SecurityFilterChain;
+import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
 import org.springframework.web.cors.CorsConfiguration;
 import org.springframework.web.cors.CorsConfigurationSource;
 import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
@@ -24,6 +26,12 @@ import java.util.List;
 @Configuration
 @EnableWebSecurity
 public class SecurityConfig {
+
+    private final JwtTokenProvider jwtTokenProvider;
+
+    public SecurityConfig(JwtTokenProvider jwtTokenProvider) {
+        this.jwtTokenProvider = jwtTokenProvider;
+    }
 
     @Bean
     public PasswordEncoder passwordEncoder() {
@@ -67,36 +75,29 @@ public class SecurityConfig {
     public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
         http.csrf(AbstractHttpConfigurer::disable)
                 .cors(Customizer.withDefaults())
+                .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests(auth -> auth
                         // Publicly accessible endpoints
                         .requestMatchers("/swagger-ui/**", "/v3/api-docs/**",
-                                "/api/public/register-session", "/api/public/get-credentials/**").permitAll()
-                        .requestMatchers("/api/public/login").authenticated()
-
+                                "/api/public/register-session", "/api/public/get-credentials/**", "/api/public/login").permitAll()
                         // File upload endpoints (all require DRIVER role)
                         .requestMatchers("/api/uploads/driver/**").hasRole("DRIVER")
                         .requestMatchers("/api/client/uploads/profile-picture").hasRole("CLIENT")
-
                         // Client-specific endpoints
-                        .requestMatchers("/api/client/**").hasAnyRole("ADMIN", "ETAMIN","CLIENT")
-
+                        .requestMatchers("/api/client/**").hasAnyRole("ADMIN", "ETAMIN", "CLIENT")
                         // Driver-specific endpoints
-                        .requestMatchers("/api/driver/**").hasAnyRole("ADMIN", "ETAMIN","DRIVER")
-
+                        .requestMatchers("/api/driver/**").hasAnyRole("ADMIN", "ETAMIN", "DRIVER")
                         // Operator-specific endpoints
-                        .requestMatchers("/api/operator/**").hasAnyRole("ADMIN", "ETAMIN","OPERATOR")
-
-                        // ETAMIN-specific endpoints (NEW) - Must be before /api/admin if ETAMIN uses common /analytics
+                        .requestMatchers("/api/operator/**").hasAnyRole("ADMIN", "ETAMIN", "OPERATOR")
+                        // ETAMIN-specific endpoints
                         .requestMatchers("/api/etamin/**").hasRole("ETAMIN")
-                        .requestMatchers("/api/analytics/**").hasAnyRole("ADMIN", "ETAMIN") // NEW: Shared analytics
-
-                        // Admin-specific endpoints (must be last for /api/admin)
+                        .requestMatchers("/api/analytics/**").hasAnyRole("ADMIN", "ETAMIN")
+                        // Admin-specific endpoints
                         .requestMatchers("/api/admin/**").hasAnyRole("ADMIN", "ETAMIN")
-
-                        // All other requests require authentication by default
+                        // All other requests require authentication
                         .anyRequest().authenticated()
                 )
-                .httpBasic(Customizer.withDefaults());
+                .addFilterBefore(new JwtAuthenticationFilter(jwtTokenProvider), UsernamePasswordAuthenticationFilter.class);
 
         return http.build();
     }

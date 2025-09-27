@@ -1,14 +1,15 @@
-package org.example.taxi.config; // Keeping it in 'config' as per your original structure, but 'bot' package would be more descriptive.
+package org.example.taxi.bot;
 
 import jakarta.annotation.PostConstruct;
 import lombok.RequiredArgsConstructor;
 import org.example.taxi.entity.User;
+import org.example.taxi.repository.UserRepository;
 import org.example.taxi.service.TelegramBotService;
 import org.example.taxi.service.cache.RegistrationCacheEntry;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.stereotype.Component; // Change to @Component if it's not strictly config but the bot itself
+import org.springframework.stereotype.Component;
 import org.telegram.telegrambots.bots.TelegramLongPollingBot;
 import org.telegram.telegrambots.meta.api.methods.updates.DeleteWebhook;
 import org.telegram.telegrambots.meta.api.objects.Update;
@@ -23,18 +24,18 @@ import java.util.Optional;
 
 @Component
 @RequiredArgsConstructor
-public class TelegramBot extends TelegramLongPollingBot { // Renamed from TelegramBotConfig
+public class TelegramBot extends TelegramLongPollingBot {
     private static final Logger logger = LoggerFactory.getLogger(TelegramBot.class);
 
     private final TelegramBotService telegramBotService;
-    private final UserSessionService userSessionService; // Inject UserSessionService
-
+    private final UserSessionService userSessionService;
     private final MessageSender messageSender;
+    private final UserRepository userRepository;
 
     @Value("${telegram.bot.token}")
     private String botToken;
 
-    @Value("${telegram.bot.name}") // Changed to username as per your config
+    @Value("${telegram.bot.name}")
     private String botUsername;
 
     @PostConstruct
@@ -84,7 +85,7 @@ public class TelegramBot extends TelegramLongPollingBot { // Renamed from Telegr
         try {
             if (update.hasMessage()) {
                 if (update.getMessage().hasText()) {
-                    handleTextMessage(update.getMessage().getText(), chatId); // No need to pass full update
+                    handleTextMessage(update.getMessage().getText(), chatId);
                 } else if (update.getMessage().hasContact()) {
                     handleContactMessage(update.getMessage().getContact().getPhoneNumber(), chatId);
                 }
@@ -96,12 +97,11 @@ public class TelegramBot extends TelegramLongPollingBot { // Renamed from Telegr
         }
     }
 
-    private void handleTextMessage(String messageText, Long chatId) { // Removed Update update parameter
+    private void handleTextMessage(String messageText, Long chatId) {
         String currentState = userSessionService.getUserState(chatId);
 
         if (messageText.startsWith("/start")) {
-            userSessionService.clearSession(chatId); // Always clear bot session on /start
-
+            userSessionService.clearSession(chatId);
             String command = messageText.substring("/start".length()).trim();
 
             if (command.startsWith("register_client_") || command.startsWith("register_driver_")) {
@@ -119,13 +119,9 @@ public class TelegramBot extends TelegramLongPollingBot { // Renamed from Telegr
                             return;
                         }
 
-                        // Start registration flow in bot service, which will set bot state and link sessionId
-                        String response = telegramBotService.startRegistrationWithSessionId(sessionId, chatId);
+                        String response = telegramBotService.startRegistrationOrLoginWithSessionId(sessionId, chatId);
                         messageSender.sendMessage(chatId, response);
-
-                        // Always ask for phone number explicitly using the button
-                        sendPhoneNumberRequest(chatId, "Please share your phone number to complete registration.");
-
+                        sendPhoneNumberRequest(chatId, "Please share your phone number to continue.");
                     } catch (IllegalArgumentException e) {
                         messageSender.sendMessage(chatId, "Invalid registration type in link. Please get a new link from the app.");
                     }
@@ -136,13 +132,14 @@ public class TelegramBot extends TelegramLongPollingBot { // Renamed from Telegr
                 userSessionService.setUserState(chatId, TelegramBotService.STATE_FORGOT_PASSWORD_AWAITING_PHONE);
                 sendPhoneNumberRequest(chatId, "Please share your phone number to reset your password.");
             } else {
-                messageSender.sendMessage(chatId, "Welcome! To register, please use the link provided by the app. To reset your password, use `/start forgot_password`.");
+                messageSender.sendMessage(chatId, "Welcome! To register or log in, use the link provided by the app. To reset password, use `/start forgot_password`.");
             }
-        } else if (TelegramBotService.STATE_REGISTER_AWAITING_PHONE.equals(currentState) || TelegramBotService.STATE_FORGOT_PASSWORD_AWAITING_PHONE.equals(currentState)) {
+        } else if (TelegramBotService.STATE_AWAITING_PHONE.equals(currentState) ||
+                TelegramBotService.STATE_FORGOT_PASSWORD_AWAITING_PHONE.equals(currentState)) {
             messageSender.sendMessage(chatId, "Please use the 'Share Phone Number' button below to provide your contact.");
-            sendPhoneNumberRequest(chatId, "Still waiting for your phone number:"); // Resend keyboard
+            sendPhoneNumberRequest(chatId, "Still waiting for your phone number:");
         } else {
-            messageSender.sendMessage(chatId, "I don't understand that command. Please use the app's registration link or `/start forgot_password`.");
+            messageSender.sendMessage(chatId, "Unknown command. Use the app's link or `/start forgot_password`.");
         }
     }
 
@@ -154,13 +151,13 @@ public class TelegramBot extends TelegramLongPollingBot { // Renamed from Telegr
                 .map(UserSession::getCurrentRegistrationSessionId)
                 .orElse(null);
 
-        if (TelegramBotService.STATE_REGISTER_AWAITING_PHONE.equals(currentState)) {
+        if (TelegramBotService.STATE_AWAITING_PHONE.equals(currentState)) {
             if (sessionId != null) {
-                responseMessage = telegramBotService.processPhoneNumberForSessionId(sessionId, phoneNumber);
+                responseMessage = telegramBotService.processPhoneNumberForSessionId(sessionId, phoneNumber, chatId);
                 messageSender.removeReplyKeyboard(chatId, responseMessage);
                 userSessionService.clearSession(chatId);
             } else {
-                responseMessage = "Registration session not found. Please restart the process from the app's link.";
+                responseMessage = "Session not found. Please restart the process from the app's link.";
                 messageSender.removeReplyKeyboard(chatId, responseMessage);
                 userSessionService.clearSession(chatId);
             }
@@ -169,7 +166,7 @@ public class TelegramBot extends TelegramLongPollingBot { // Renamed from Telegr
             messageSender.removeReplyKeyboard(chatId, responseMessage);
             userSessionService.clearSession(chatId);
         } else {
-            responseMessage = "I'm not expecting a phone number right now. Please use the app's registration link or `/start forgot_password`.";
+            responseMessage = "Not expecting a phone number now. Use the app's link or `/start forgot_password`.";
             messageSender.removeReplyKeyboard(chatId, responseMessage);
             userSessionService.clearSession(chatId);
         }

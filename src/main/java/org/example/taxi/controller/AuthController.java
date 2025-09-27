@@ -1,26 +1,29 @@
 package org.example.taxi.controller;
 
-import org.example.taxi.config.UserSessionService;
+import org.example.taxi.bot.UserSessionService;
+import org.example.taxi.config.JwtTokenProvider;
 import org.example.taxi.entity.User;
+import org.example.taxi.repository.UserRepository;
 import org.example.taxi.service.TelegramBotService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.authentication.AuthenticationManager;
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
-import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.server.ResponseStatusException;
 
+import jakarta.validation.Valid;
 import java.util.HashMap;
 import java.util.Map;
-import java.util.UUID;
 import java.util.stream.Collectors;
 
-// LoginRequest record remains for documentation/consistency
 record LoginRequest(String phoneNumber, String password) {}
+
 @RestController
 @RequestMapping("/api/public")
 public class AuthController {
@@ -28,18 +31,17 @@ public class AuthController {
     private static final Logger logger = LoggerFactory.getLogger(AuthController.class);
 
     @Autowired
-    private UserSessionService userSessionService; // Inject UserSessionService
+    private UserSessionService userSessionService;
     @Autowired
-    private TelegramBotService telegramBotService; // Inject TelegramBotService
+    private TelegramBotService telegramBotService;
+    @Autowired
+    private AuthenticationManager authenticationManager;
+    @Autowired
+    private JwtTokenProvider jwtTokenProvider;
 
-    /**
-     * Endpoint to generate a unique registration session ID for the client.
-     * The client (web/mobile app) calls this first to get a sessionId.
-     * This sessionId is then used to construct the deep link for the Telegram bot.
-     *
-     * @param userType The type of user to register (CLIENT or DRIVER).
-     * @return A map containing the generated sessionId.
-     */
+    @Autowired
+    private  UserRepository userRepository;
+
     @GetMapping("/register-session")
     public ResponseEntity<?> generateRegistrationSession(@RequestParam String userType) {
         User.UserType parsedUserType;
@@ -50,7 +52,7 @@ public class AuthController {
         }
 
         String sessionId = userSessionService.createRegistrationSession(parsedUserType);
-        String botUsername = "ideal_taxi_user_bot"; // Replace with your actual bot username
+        String botUsername = "ideal_taxi_user_bot";
         String deepLink = String.format("https://t.me/%s?start=register_%s_%s", botUsername, userType.toLowerCase(), sessionId);
 
         Map<String, String> response = new HashMap<>();
@@ -60,22 +62,24 @@ public class AuthController {
         return ResponseEntity.ok(response);
     }
 
-    /**
-     * Endpoint for the client (web/mobile app) to retrieve the generated credentials
-     * after the user has completed the interaction with the Telegram bot.
-     * This finalizes the registration.
-     *
-     * @param sessionId The unique ID previously generated.
-     * @return A map containing the registered user's phone number and plaintext password.
-     */
     @GetMapping("/get-credentials/{sessionId}")
     public ResponseEntity<?> getCredentials(@PathVariable String sessionId) {
         try {
-            // This method in TelegramBotService will finalize registration,
-            // send password to Telegram bot, and return phone/password to the app.
             Map<String, String> credentials = telegramBotService.finalizeRegistrationAndGetCredentials(sessionId);
+            String phoneNumber = credentials.get("phoneNumber");
+            String password = credentials.get("password");
+            User user = userRepository.findByPhoneNumber(phoneNumber).orElseThrow();
 
-            return ResponseEntity.ok(credentials);
+            String role = credentials.getOrDefault("role", user.getUserType().name());
+            String token = jwtTokenProvider.generateToken(phoneNumber, role);
+
+            Map<String, String> response = new HashMap<>();
+            response.put("phoneNumber", phoneNumber);
+            response.put("password", password);
+            response.put("token", token);
+            response.put("message", "Registration completed. Use the JWT token for authentication.");
+
+            return ResponseEntity.ok(response);
         } catch (ResponseStatusException e) {
             logger.error("Error retrieving credentials for session {}: {}", sessionId, e.getReason());
             return ResponseEntity.status(e.getStatusCode()).body(Map.of("error", e.getReason()));
@@ -85,30 +89,36 @@ public class AuthController {
         }
     }
 
-
-    /**
-     * This /login endpoint confirms successful Basic Authentication.
-     * ... (unchanged from previous version) ...
-     */
     @PostMapping("/login")
-    public ResponseEntity<?> login() {
-        Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
+    public ResponseEntity<?> login(@Valid @RequestBody LoginRequest loginRequest) {
+        try {
+            Authentication authentication = authenticationManager.authenticate(
+                    new UsernamePasswordAuthenticationToken(loginRequest.phoneNumber(), loginRequest.password())
+            );
+            SecurityContextHolder.getContext().setAuthentication(authentication);
 
-        if (authentication != null && authentication.isAuthenticated()) {
-            UserDetails userDetails = (UserDetails) authentication.getPrincipal();
+            String phoneNumber = loginRequest.phoneNumber();
+            User user = userRepository.findByPhoneNumber(phoneNumber).orElseThrow();
+            String role = authentication.getAuthorities().stream()
+                    .map(Object::toString)
+                    .map(auth -> auth.replace("ROLE_", ""))
+                    .findFirst()
+                    .orElse(user.getUserType().name()); // Default to CLIENT if no role found
+            String token = jwtTokenProvider.generateToken(phoneNumber, role);
 
             Map<String, Object> response = new HashMap<>();
-            response.put("message", "Login successful via Basic Authentication.");
-            response.put("phoneNumber", userDetails.getUsername());
+            response.put("message", "Login successful.");
+            response.put("phoneNumber", phoneNumber);
+            response.put("token", token);
             response.put("roles", authentication.getAuthorities().stream()
                     .map(Object::toString)
                     .collect(Collectors.toList()));
 
-            logger.info("User {} successfully logged in with roles: {}", userDetails.getUsername(), authentication.getAuthorities());
+            logger.info("User {} successfully logged in with roles: {}", phoneNumber, authentication.getAuthorities());
             return ResponseEntity.ok(response);
-        } else {
-            logger.warn("Attempt to access /login endpoint without successful authentication detected. This is unexpected.");
-            return ResponseEntity.status(401).body(Map.of("error", "Unauthorized access. Provide valid Basic Auth credentials."));
+        } catch (Exception e) {
+            logger.error("Login failed for user {}: {}", loginRequest.phoneNumber(), e.getMessage());
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(Map.of("error", "Invalid phone number or password."));
         }
     }
 }

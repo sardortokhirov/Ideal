@@ -1,4 +1,4 @@
-package org.example.taxi.config;
+package org.example.taxi.bot;
 
 import org.example.taxi.service.cache.RegistrationCacheEntry;
 import org.slf4j.Logger;

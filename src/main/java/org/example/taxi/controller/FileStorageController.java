@@ -6,11 +6,10 @@ import org.example.taxi.service.DriverService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.http.MediaType; // IMPORTANT: Ensure this is imported
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
-import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 import org.springframework.web.server.ResponseStatusException;
@@ -38,17 +37,19 @@ public class FileStorageController {
 
     private Long getAuthenticatedUserId() {
         Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
-        UserDetails userDetails = (UserDetails) authentication.getPrincipal();
-        return userRepository.findByPhoneNumber(userDetails.getUsername())
+        if (authentication == null || !authentication.isAuthenticated()) {
+            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "User not authenticated.");
+        }
+        String phoneNumber = authentication.getName(); // JWT sets phoneNumber as the principal
+        return userRepository.findByPhoneNumber(phoneNumber)
                 .map(org.example.taxi.entity.User::getId)
-                .orElseThrow(() -> new IllegalStateException("Authenticated user not found in database."));
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Authenticated user not found in database."));
     }
 
     private String getAuthenticatedUserPhoneNumber() {
         Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
-        if (authentication != null && authentication.isAuthenticated() && !(authentication.getPrincipal() instanceof String)) {
-            UserDetails userDetails = (UserDetails) authentication.getPrincipal();
-            return userDetails.getUsername();
+        if (authentication != null && authentication.isAuthenticated()) {
+            return authentication.getName(); // JWT sets phoneNumber as the principal
         }
         throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "User not authenticated.");
     }
@@ -79,10 +80,10 @@ public class FileStorageController {
 
     @Operation(summary = "Uploads driver's profile picture",
             description = "Uploads an image file to S3 and updates the driver's profilePictureUrl in the database.")
-    @PostMapping(value = "/profile-picture", consumes = MediaType.MULTIPART_FORM_DATA_VALUE) // Explicitly set consumes
+    @PostMapping(value = "/profile-picture", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     public ResponseEntity<?> uploadProfilePicture(
             @Parameter(description = "The profile picture file to upload (e.g., JPEG, PNG)", required = true, schema = @Schema(type = "string", format = "binary"))
-            @RequestParam("file") MultipartFile file) { // @RequestParam("file") ensures the part name is 'file'
+            @RequestParam("file") MultipartFile file) {
         return handleFileUploadAndProfileUpdate(file, "profilePicture", "profile-pictures");
     }
 

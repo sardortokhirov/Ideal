@@ -11,17 +11,15 @@ import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
-import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.web.bind.annotation.*;
 
-import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 
 @RestController
-@RequestMapping("/api/etamin/market-control") // Base path for ETAMIN market control
+@RequestMapping("/api/etamin/market-control")
 public class MarketControlController {
 
     private static final Logger logger = LoggerFactory.getLogger(MarketControlController.class);
@@ -31,15 +29,18 @@ public class MarketControlController {
 
     private Long getAuthenticatedUserId() {
         Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
-        UserDetails userDetails = (UserDetails) authentication.getPrincipal();
-        return userRepository.findByPhoneNumber(userDetails.getUsername())
+        if (authentication == null || !authentication.isAuthenticated()) {
+            throw new org.springframework.web.server.ResponseStatusException(org.springframework.http.HttpStatus.UNAUTHORIZED, "User not authenticated.");
+        }
+        String phoneNumber = authentication.getName(); // JWT sets phoneNumber as the principal
+        return userRepository.findByPhoneNumber(phoneNumber)
                 .map(org.example.taxi.entity.User::getId)
-                .orElseThrow(() -> new IllegalStateException("Authenticated user not found in database."));
+                .orElseThrow(() -> new org.springframework.web.server.ResponseStatusException(org.springframework.http.HttpStatus.UNAUTHORIZED, "Authenticated user not found in database."));
     }
 
     // --- Market Control Specific Analytics (ETAMIN) ---
 
-    @GetMapping("/daily-active-drivers") // Corrected path
+    @GetMapping("/daily-active-drivers")
     public ResponseEntity<List<ChartDataPoint>> getDailyActiveDrivers(
             @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime start,
             @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime end) {
@@ -47,7 +48,7 @@ public class MarketControlController {
         return ResponseEntity.ok(marketControlService.getDailyActiveDrivers(start, end));
     }
 
-    @GetMapping("/daily-new-clients-by-source") // Corrected path
+    @GetMapping("/daily-new-clients-by-source")
     public ResponseEntity<List<Map<String, Object>>> getDailyNewClientsBySource(
             @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime start,
             @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime end) {
@@ -55,19 +56,19 @@ public class MarketControlController {
         return ResponseEntity.ok(marketControlService.getDailyNewClientsBySource(start, end));
     }
 
-    @GetMapping("/clients-by-district") // Corrected path
+    @GetMapping("/clients-by-district")
     public ResponseEntity<List<ChartDataPoint>> getClientsByDistrictDistribution() {
         logger.info("ETAMIN (User ID: {}) requesting clients by district distribution.", getAuthenticatedUserId());
         return ResponseEntity.ok(marketControlService.getClientsByDistrictDistribution());
     }
 
-    @GetMapping("/order-status-distribution") // Corrected path
+    @GetMapping("/order-status-distribution")
     public ResponseEntity<List<ChartDataPoint>> getOrderStatusDistribution() {
         logger.info("ETAMIN (User ID: {}) requesting order status distribution.", getAuthenticatedUserId());
         return ResponseEntity.ok(marketControlService.getOrderStatusDistribution());
     }
 
-    @GetMapping("/daily-new-clients") // Corrected path
+    @GetMapping("/daily-new-clients")
     public ResponseEntity<List<ChartDataPoint>> getDailyNewClients(
             @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime start,
             @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime end) {
@@ -75,7 +76,7 @@ public class MarketControlController {
         return ResponseEntity.ok(marketControlService.getDailyNewClients(start, end));
     }
 
-    @GetMapping("/clients-by-order-source") // Corrected path
+    @GetMapping("/clients-by-order-source")
     public ResponseEntity<List<ChartDataPoint>> getClientsByOrderSource(
             @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime start,
             @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime end) {
@@ -83,7 +84,7 @@ public class MarketControlController {
         return ResponseEntity.ok(marketControlService.getClientsByOrderSource(start, end));
     }
 
-    @GetMapping("/clients-by-order-source-all-time") // Corrected path
+    @GetMapping("/clients-by-order-source-all-time")
     public ResponseEntity<List<ChartDataPoint>> getClientsByOrderSourceAllTime() {
         logger.info("ETAMIN (User ID: {}) requesting clients by order source (all time).", getAuthenticatedUserId());
         return ResponseEntity.ok(marketControlService.getClientsByOrderSourceAllTime());

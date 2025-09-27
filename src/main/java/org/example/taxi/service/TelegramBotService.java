@@ -1,6 +1,6 @@
 package org.example.taxi.service;
 
-import org.example.taxi.config.UserSessionService;
+import org.example.taxi.bot.UserSessionService;
 import org.example.taxi.entity.Client;
 import org.example.taxi.entity.Driver;
 import org.example.taxi.entity.User;
@@ -37,25 +37,15 @@ public class TelegramBotService {
     @Autowired
     private PasswordEncoder passwordEncoder;
 
-    // Define states
-    public static final String STATE_REGISTER_AWAITING_PHONE = "REGISTER_AWAITING_PHONE";
+    public static final String STATE_AWAITING_PHONE = "AWAITING_PHONE";
     public static final String STATE_FORGOT_PASSWORD_AWAITING_PHONE = "FORGOT_PASSWORD_AWAITING_PHONE";
 
-
-    /**
-     * Initializes a Telegram bot registration flow linked to a web-generated session ID.
-     * Stores the chatId in the registration cache and links it to the bot's UserSession.
-     *
-     * @param sessionId The unique ID from the web app.
-     * @param chatId The Telegram chat ID.
-     * @return A message to display to the user.
-     */
-    public String startRegistrationWithSessionId(String sessionId, Long chatId) {
+    public String startRegistrationOrLoginWithSessionId(String sessionId, Long chatId) {
         Optional<RegistrationCacheEntry> entryOpt = userSessionService.getRegistrationCacheEntry(sessionId);
 
         if (entryOpt.isEmpty()) {
             userSessionService.clearSession(chatId);
-            return "This registration link is invalid or has expired. Please get a new link from the app.";
+            return "This link is invalid or has expired. Please get a new link from the app.";
         }
 
         RegistrationCacheEntry entry = entryOpt.get();
@@ -63,46 +53,40 @@ public class TelegramBotService {
         if (entry.getChatId() != null && !entry.getChatId().equals(chatId)) {
             userSessionService.clearRegistrationSession(sessionId);
             userSessionService.clearSession(chatId);
-            return "This registration link has already been used or is active in another chat. Please get a new link.";
+            return "This link has already been used or is active in another chat. Please get a new link.";
         }
 
-        // Ensure the RegistrationCacheEntry is updated with the chatId
         if (entry.getChatId() == null) {
             entry.setChatId(chatId);
             userSessionService.updateRegistrationCacheEntry(entry);
-            logger.info("Registration session {} linked to chatId {}", sessionId, chatId);
+            logger.info("Session {} linked to chatId {}", sessionId, chatId);
         }
 
-        // --- UPDATED TO USE NEW METHOD ---
         userSessionService.linkChatToRegistrationSession(chatId, sessionId);
-        // --- END UPDATE ---
-
-        userSessionService.setUserState(chatId, STATE_REGISTER_AWAITING_PHONE);
-        return "You are registering as a *" + entry.getUserType().name() + "*.";
+        userSessionService.setUserState(chatId, STATE_AWAITING_PHONE);
+        return "Please provide your phone number to register or log in as a *" + entry.getUserType().name() + "*.";
     }
 
-    /**
-     * Processes the phone number provided by the Telegram user for a web-initiated registration session.
-     * Saves the phone number and generated password temporarily in the cache.
-     *
-     * @param sessionId The unique ID from the web app.
-     * @param phoneNumber The user's phone number.
-     * @return A message to display to the user.
-     */
-    public String processPhoneNumberForSessionId(String sessionId, String phoneNumber) {
+    public String processPhoneNumberForSessionId(String sessionId, String phoneNumber, Long chatId) {
         Optional<RegistrationCacheEntry> entryOpt = userSessionService.getRegistrationCacheEntry(sessionId);
 
         if (entryOpt.isEmpty()) {
-            return "This registration session has expired. Please get a new link from the app.";
+            return "This session has expired. Please get a new link from the app.";
         }
 
         RegistrationCacheEntry entry = entryOpt.get();
         String normalizedPhoneNumber = normalizePhoneNumber(phoneNumber);
 
-        if (userRepository.existsByPhoneNumber(normalizedPhoneNumber)) {
-            userSessionService.clearRegistrationSession(sessionId);
-            userSessionService.clearSession(entry.getChatId());
-            return "An account with this phone number already exists. Please use 'Forgot Password' in the app.";
+        Optional<User> existingUserOpt = userRepository.findByPhoneNumber(normalizedPhoneNumber);
+        if (existingUserOpt.isPresent()) {
+            User user = existingUserOpt.get();
+            user.setChatId(chatId);
+            userRepository.save(user);
+            entry.setPhoneNumber(normalizedPhoneNumber);
+            // Do not generate or store a new password for existing users
+            userSessionService.updateRegistrationCacheEntry(entry);
+            logger.info("User logged in: phoneNumber={}, chatId={}", normalizedPhoneNumber, chatId);
+            return "Successfully logged in with phone number: " + normalizedPhoneNumber + ". Please return to the app and click 'Get Credentials' to proceed.";
         }
 
         entry.setPhoneNumber(normalizedPhoneNumber);
@@ -110,39 +94,44 @@ public class TelegramBotService {
         entry.setGeneratedPassword(generatedRawPassword);
         userSessionService.updateRegistrationCacheEntry(entry);
 
-        logger.info("Phone number {} received and stored for registration session {}. Waiting for app to finalize.", normalizedPhoneNumber, sessionId);
+        logger.info("Phone number {} received for registration session {}. Waiting for app to finalize.", normalizedPhoneNumber, sessionId);
         return "Thank you! Your phone number (" + normalizedPhoneNumber + ") is now linked to your registration. Please return to the app and click 'Get Password' to finalize your registration. \n_Your generated password is: *" + generatedRawPassword + "*_";
     }
 
-
-    /**
-     * Finalizes the registration process based on cached data and returns credentials to the app.
-     * This method is called by the AuthController (from the web/app).
-     *
-     * @param sessionId The unique ID from the web app.
-     * @return A map containing the user's phone number and the *plaintext* generated password.
-     */
     @Transactional
     public Map<String, String> finalizeRegistrationAndGetCredentials(String sessionId) {
         Optional<RegistrationCacheEntry> entryOpt = userSessionService.getRegistrationCacheEntry(sessionId);
 
         if (entryOpt.isEmpty()) {
-            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Registration session invalid or expired.");
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Session invalid or expired.");
         }
 
         RegistrationCacheEntry entry = entryOpt.get();
 
-        if (entry.getPhoneNumber() == null || entry.getChatId() == null || entry.getGeneratedPassword() == null) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Phone number, Telegram chat, or generated password not linked yet. Please complete bot interaction.");
+        if (entry.getPhoneNumber() == null || entry.getChatId() == null) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Phone number or Telegram chat not linked. Please complete bot interaction.");
         }
 
-        if (userRepository.existsByPhoneNumber(entry.getPhoneNumber())) {
+        String normalizedPhoneNumber = entry.getPhoneNumber();
+        Optional<User> existingUserOpt = userRepository.findByPhoneNumber(normalizedPhoneNumber);
+
+        if (existingUserOpt.isPresent()) {
+            Map<String, String> credentials = new HashMap<>();
+            credentials.put("phoneNumber", normalizedPhoneNumber);
+            // Do not include password for existing users
             userSessionService.clearRegistrationSession(sessionId);
-            throw new ResponseStatusException(HttpStatus.CONFLICT, "User with this phone number already exists.");
+            userSessionService.clearSession(entry.getChatId());
+            logger.info("Credentials retrieved for existing user: phoneNumber={}", normalizedPhoneNumber);
+            return credentials;
         }
+
         if (userRepository.existsByChatId(entry.getChatId())) {
             userSessionService.clearRegistrationSession(sessionId);
-            throw new ResponseStatusException(HttpStatus.CONFLICT, "Telegram account already linked to another user. If this is a mistake, please use forgot password or contact support.");
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "Telegram account already linked to another user. Use forgot password or contact support.");
+        }
+
+        if (entry.getGeneratedPassword() == null) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Generated password not found. Please complete bot interaction.");
         }
 
         String generatedRawPassword = entry.getGeneratedPassword();
@@ -150,7 +139,7 @@ public class TelegramBotService {
 
         User newUser = new User();
         newUser.setChatId(entry.getChatId());
-        newUser.setPhoneNumber(entry.getPhoneNumber());
+        newUser.setPhoneNumber(normalizedPhoneNumber);
         newUser.setPassword(encodedPassword);
         newUser.setUserType(entry.getUserType());
         newUser = userRepository.save(newUser);
@@ -159,19 +148,19 @@ public class TelegramBotService {
             Driver driver = new Driver();
             driver.setUser(newUser);
             driverRepository.save(driver);
-            logger.info("New DRIVER registered: userId={}, phoneNumber={}", newUser.getId(), entry.getPhoneNumber());
+            logger.info("New DRIVER registered: userId={}, phoneNumber={}", newUser.getId(), normalizedPhoneNumber);
         } else if (User.UserType.CLIENT.equals(entry.getUserType())) {
             Client client = new Client();
             client.setUser(newUser);
             clientRepository.save(client);
-            logger.info("New CLIENT registered: userId={}, phoneNumber={}", newUser.getId(), entry.getPhoneNumber());
+            logger.info("New CLIENT registered: userId={}, phoneNumber={}", newUser.getId(), normalizedPhoneNumber);
         } else {
             logger.error("UserType {} not supported during bot registration for userId={}", entry.getUserType(), newUser.getId());
             throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR, "Invalid user type specified during registration.");
         }
 
         Map<String, String> credentials = new HashMap<>();
-        credentials.put("phoneNumber", entry.getPhoneNumber());
+        credentials.put("phoneNumber", normalizedPhoneNumber);
         credentials.put("password", generatedRawPassword);
 
         userSessionService.clearRegistrationSession(sessionId);
@@ -180,13 +169,6 @@ public class TelegramBotService {
         return credentials;
     }
 
-
-    /**
-     * Handles forgot password process.
-     * @param chatId The Telegram chat ID.
-     * @param phoneNumber The user's phone number.
-     * @return A message containing the new generated password or an error.
-     */
     @Transactional
     public String resetPassword(Long chatId, String phoneNumber) {
         String normalizedPhoneNumber = normalizePhoneNumber(phoneNumber);

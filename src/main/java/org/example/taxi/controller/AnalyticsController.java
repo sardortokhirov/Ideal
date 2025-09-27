@@ -3,38 +3,39 @@ package org.example.taxi.controller;
 import org.example.taxi.controller.dto.*;
 import org.example.taxi.entity.District;
 import org.example.taxi.repository.UserRepository;
-import org.example.taxi.service.AdminService; // Analytics logic resides in AdminService
-import org.example.taxi.service.MarketControlService; // Specific ETAMIN market control
+import org.example.taxi.service.AdminService;
+import org.example.taxi.service.MarketControlService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
-import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.web.bind.annotation.*;
 
 import java.time.LocalDateTime;
 import java.util.List;
-import java.util.Map;
 import java.util.Optional;
 
 @RestController
-@RequestMapping("/api/analytics") // Common base path for shared analytics
+@RequestMapping("/api/analytics")
 public class AnalyticsController {
 
     private static final Logger logger = LoggerFactory.getLogger(AnalyticsController.class);
 
-    @Autowired private AdminService adminService; // Calls AdminService for general analytics
-    @Autowired private MarketControlService marketControlService; // Calls MarketControlService for ETAMIN-specific analytics
-    @Autowired private UserRepository userRepository; // For authentication helper
+    @Autowired private AdminService adminService;
+    @Autowired private MarketControlService marketControlService;
+    @Autowired private UserRepository userRepository;
 
     private Long getAuthenticatedUserId() {
         Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
-        UserDetails userDetails = (UserDetails) authentication.getPrincipal();
-        return userRepository.findByPhoneNumber(userDetails.getUsername())
+        if (authentication == null || !authentication.isAuthenticated()) {
+            throw new org.springframework.web.server.ResponseStatusException(org.springframework.http.HttpStatus.UNAUTHORIZED, "User not authenticated.");
+        }
+        String phoneNumber = authentication.getName(); // JWT sets phoneNumber as the principal
+        return userRepository.findByPhoneNumber(phoneNumber)
                 .map(org.example.taxi.entity.User::getId)
-                .orElseThrow(() -> new IllegalStateException("Authenticated user not found in database."));
+                .orElseThrow(() -> new org.springframework.web.server.ResponseStatusException(org.springframework.http.HttpStatus.UNAUTHORIZED, "Authenticated user not found in database."));
     }
 
     // --- General Dashboard Summary (Shared) ---
@@ -109,9 +110,6 @@ public class AnalyticsController {
     }
 
     // --- District Distribution Analytics (Shared) ---
-    // These methods are now in MarketControlService for ETAMIN, but AdminService also has similar methods.
-    // We should decide if these are truly identical and call one from the other or keep separate.
-    // For now, these AnalyticsController endpoints will call AdminService's methods.
     @GetMapping("/users-by-district")
     public ResponseEntity<List<ChartDataPoint>> getUsersByDistrictDistribution() {
         logger.info("User (ID: {}) requesting users by district distribution.", getAuthenticatedUserId());

@@ -5,7 +5,7 @@ import org.example.taxi.controller.dto.DriverProfileResponse;
 import org.example.taxi.controller.dto.OrderStatusUpdateRequest;
 import org.example.taxi.entity.Driver;
 import org.example.taxi.entity.OrderEntity;
-import org.example.taxi.entity.OrderEntity.OrderStatus; // Import the enum
+import org.example.taxi.entity.OrderEntity.OrderStatus;
 import org.example.taxi.repository.UserRepository;
 import org.example.taxi.service.DriverService;
 import org.example.taxi.service.OrderService;
@@ -16,15 +16,13 @@ import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
-import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.server.ResponseStatusException;
 
 import jakarta.validation.Valid;
 import java.time.LocalDateTime;
 import java.util.List;
-import java.util.Map;
 import java.util.Optional;
-
 
 @RestController
 @RequestMapping("/api/driver")
@@ -36,13 +34,15 @@ public class DriverController {
     @Autowired private UserRepository userRepository;
     @Autowired private OrderService orderService;
 
-
     private Long getAuthenticatedUserId() {
         Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
-        UserDetails userDetails = (UserDetails) authentication.getPrincipal();
-        return userRepository.findByPhoneNumber(userDetails.getUsername())
+        if (authentication == null || !authentication.isAuthenticated()) {
+            throw new ResponseStatusException(org.springframework.http.HttpStatus.UNAUTHORIZED, "User not authenticated.");
+        }
+        String phoneNumber = authentication.getName(); // JWT sets phoneNumber as the principal
+        return userRepository.findByPhoneNumber(phoneNumber)
                 .map(org.example.taxi.entity.User::getId)
-                .orElseThrow(() -> new IllegalStateException("Authenticated user not found in database."));
+                .orElseThrow(() -> new ResponseStatusException(org.springframework.http.HttpStatus.UNAUTHORIZED, "Authenticated user not found in database."));
     }
 
     @GetMapping("/profile")
@@ -75,7 +75,7 @@ public class DriverController {
         Long authenticatedUserId = getAuthenticatedUserId();
         Driver driver = driverService.getDriverProfile(authenticatedUserId);
         if (driver.getDistrict() == null || driver.getDistrict().getRegion() == null) {
-            throw new org.springframework.web.server.ResponseStatusException(org.springframework.http.HttpStatus.BAD_REQUEST, "Driver's district or region not set. Please complete profile.");
+            throw new ResponseStatusException(org.springframework.http.HttpStatus.BAD_REQUEST, "Driver's district or region not set. Please complete profile.");
         }
         Long driverDistrictId = driver.getDistrict().getId();
         Long driverRegionId = driver.getDistrict().getRegion().getId();
@@ -99,7 +99,7 @@ public class DriverController {
     public ResponseEntity<OrderEntity> updateOrderStatus(@PathVariable Long orderId, @Valid @RequestBody OrderStatusUpdateRequest request) {
         Long authenticatedUserId = getAuthenticatedUserId();
         logger.info("Driver (User ID: {}) attempting to update status of order {} to {}.", authenticatedUserId, orderId, request.getNewStatus().name());
-        return ResponseEntity.ok(driverService.updateOrderStatus(authenticatedUserId, orderId, request.getNewStatus().name())); // Pass enum directly
+        return ResponseEntity.ok(driverService.updateOrderStatus(authenticatedUserId, orderId, request.getNewStatus().name()));
     }
 
     @GetMapping("/history")
@@ -114,10 +114,10 @@ public class DriverController {
     }
 
     @GetMapping("/active-order")
-    public ResponseEntity<List<OrderEntity>> getDriverActiveOrders() { // CRITICAL FIX: Changed return type to List
+    public ResponseEntity<List<OrderEntity>> getDriverActiveOrders() {
         Long authenticatedUserId = getAuthenticatedUserId();
         logger.info("Fetching active orders for driver (User ID: {}).", authenticatedUserId);
-        List<OrderEntity> activeOrders = driverService.getDriverActiveOrders(authenticatedUserId); // Call method returning List
+        List<OrderEntity> activeOrders = driverService.getDriverActiveOrders(authenticatedUserId);
         if (activeOrders.isEmpty()) {
             return ResponseEntity.noContent().build();
         }

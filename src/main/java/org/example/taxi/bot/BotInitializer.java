@@ -1,4 +1,4 @@
-package org.example.taxi.config;
+package org.example.taxi.bot;
 
 import jakarta.annotation.PostConstruct;
 import org.springframework.beans.factory.annotation.Autowired;

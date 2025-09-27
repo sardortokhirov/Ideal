@@ -1,4 +1,4 @@
-package org.example.taxi.config;
+package org.example.taxi.bot;
 
 import lombok.Data;
 import java.util.ArrayList;

@@ -1,4 +1,4 @@
-package org.example.taxi.config; // Changed package to match your current project structure
+package org.example.taxi.bot; // Changed package to match your current project structure
 
 import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;

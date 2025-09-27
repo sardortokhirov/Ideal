@@ -16,8 +16,8 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
-import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.server.ResponseStatusException;
 
 import jakarta.validation.Valid;
 import java.util.List;
@@ -36,10 +36,13 @@ public class AdminController {
 
     private Long getAuthenticatedUserId() {
         Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
-        UserDetails userDetails = (UserDetails) authentication.getPrincipal();
-        return userRepository.findByPhoneNumber(userDetails.getUsername())
+        if (authentication == null || !authentication.isAuthenticated()) {
+            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "User not authenticated.");
+        }
+        String phoneNumber = authentication.getName(); // JWT sets phoneNumber as the principal
+        return userRepository.findByPhoneNumber(phoneNumber)
                 .map(org.example.taxi.entity.User::getId)
-                .orElseThrow(() -> new IllegalStateException("Authenticated admin user not found in database."));
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Authenticated user not found in database."));
     }
 
     // --- Operator Management (Admin Exclusive) ---
@@ -91,7 +94,7 @@ public class AdminController {
         return adminService.getPriceConfigById(priceId)
                 .map(PriceResponse::fromEntity)
                 .map(ResponseEntity::ok)
-                .orElseThrow(() -> new org.springframework.web.server.ResponseStatusException(HttpStatus.NOT_FOUND, "Price configuration not found with ID: " + priceId));
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Price configuration not found with ID: " + priceId));
     }
 
     @DeleteMapping("/prices/{priceId}")
@@ -102,13 +105,11 @@ public class AdminController {
     }
 
     // --- Order Management Endpoints (Admin Exclusive) ---
-    // Note: These methods use the general analytics methods from AdminService, but are exposed as ADMIN APIs.
 
     @GetMapping("/orders")
     public ResponseEntity<Page<DetailedOrderResponse>> getOrders(
             @Valid OrderFilterRequest filter,
             @PageableDefault(size = 10, sort = "createdAt,desc") Pageable pageable) {
-
         logger.info("Admin (User ID: {}) requesting orders with filter: {} and pagination: {}.", getAuthenticatedUserId(), filter, pageable);
         return ResponseEntity.ok(adminService.getOrders(filter, pageable));
     }

@@ -16,7 +16,6 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
-import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.server.ResponseStatusException;
 
@@ -27,7 +26,7 @@ import java.util.List;
 import java.util.Optional;
 
 @RestController
-@RequestMapping("/api/etamin/goal-control") // Base path for ETAMIN goal control
+@RequestMapping("/api/etamin/goal-control")
 public class GoalController {
 
     private static final Logger logger = LoggerFactory.getLogger(GoalController.class);
@@ -38,19 +37,22 @@ public class GoalController {
 
     private Long getAuthenticatedUserId() {
         Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
-        UserDetails userDetails = (UserDetails) authentication.getPrincipal();
-        return userRepository.findByPhoneNumber(userDetails.getUsername())
+        if (authentication == null || !authentication.isAuthenticated()) {
+            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "User not authenticated.");
+        }
+        String phoneNumber = authentication.getName(); // JWT sets phoneNumber as the principal
+        return userRepository.findByPhoneNumber(phoneNumber)
                 .map(org.example.taxi.entity.User::getId)
-                .orElseThrow(() -> new IllegalStateException("Authenticated user not found in database."));
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Authenticated user not found in database."));
     }
 
-    @PostMapping("/") // Corrected path
+    @PostMapping("/")
     public ResponseEntity<GoalResponse> createOrUpdateGoal(@Valid @RequestBody GoalRequest request) {
         logger.info("ETAMIN (User ID: {}) creating/updating goal for month {}.", getAuthenticatedUserId(), request.getMonth());
         return ResponseEntity.status(HttpStatus.CREATED).body(goalService.createOrUpdateGoal(request));
     }
 
-    @GetMapping("/") // Corrected path
+    @GetMapping("/")
     public ResponseEntity<List<GoalResponse>> getAllGoals() {
         logger.info("ETAMIN (User ID: {}) requesting all goals.", getAuthenticatedUserId());
         List<GoalResponse> goals = goalService.getAllGoals();
@@ -60,7 +62,7 @@ public class GoalController {
         return ResponseEntity.ok(goals);
     }
 
-    @GetMapping("/{id}") // Corrected path
+    @GetMapping("/{id}")
     public ResponseEntity<GoalResponse> getGoalById(@PathVariable Long id) {
         logger.info("ETAMIN (User ID: {}) requesting goal by ID: {}.", getAuthenticatedUserId(), id);
         return goalService.getGoalById(id)
@@ -68,21 +70,21 @@ public class GoalController {
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Goal not found with ID: " + id));
     }
 
-    @DeleteMapping("/{id}") // Corrected path
+    @DeleteMapping("/{id}")
     public ResponseEntity<Void> deleteGoal(@PathVariable Long id) {
         logger.info("ETAMIN (User ID: {}) deleting goal with ID: {}.", getAuthenticatedUserId(), id);
         goalService.deleteGoal(id);
         return ResponseEntity.noContent().build();
     }
 
-    @GetMapping("/progression") // Corrected path
+    @GetMapping("/progression")
     public ResponseEntity<GoalProgressionResponse> getGoalProgression(
             @RequestParam @DateTimeFormat(pattern = "yyyy-MM") YearMonth month) {
         logger.info("ETAMIN (User ID: {}) requesting goal progression for month {}.", getAuthenticatedUserId(), month);
         return ResponseEntity.ok(goalService.getGoalProgression(month));
     }
 
-    @GetMapping("/calculator") // Corrected path
+    @GetMapping("/calculator")
     public ResponseEntity<GoalCalculatorResponse> calculateGoal(
             @RequestParam BigDecimal targetRevenue,
             @RequestParam Optional<BigDecimal> avgClientRevenue,
