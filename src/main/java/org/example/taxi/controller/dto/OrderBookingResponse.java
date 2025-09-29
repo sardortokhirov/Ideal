@@ -3,8 +3,8 @@ package org.example.taxi.controller.dto;
 import jakarta.validation.constraints.FutureOrPresent;
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
-import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
+import jakarta.annotation.Nullable;
 import lombok.AllArgsConstructor;
 import lombok.Data;
 import lombok.NoArgsConstructor;
@@ -26,11 +26,11 @@ public class OrderBookingResponse {
     private LocalDateTime pickupTime;
     private int seats;
     private BigDecimal totalCost;
-    private String status; // Still String for DTO, but internally enum
-    private boolean premium;
+    private OrderEntity.OrderStatus status;
+    private OrderEntity.OrderType orderType;
     private List<String> selectedSeats;
-    private String luggageType;
-    private BigDecimal luggageFee;
+    private String luggageContactInfo;
+    private String extraInfo;
 
     public static OrderBookingResponse fromEntity(OrderEntity order) {
         if (order == null) {
@@ -45,11 +45,11 @@ public class OrderBookingResponse {
                 order.getPickupTime(),
                 order.getSeats(),
                 order.getTotalCost(),
-                order.getStatus() != null ? order.getStatus().name() : null, // Convert enum to String
-                order.isPremium(),
+                order.getStatus(),
+                order.getOrderType(),
                 order.getSelectedSeats(),
-                order.getLuggageType(),
-                order.getLuggageFee()
+                order.getLuggageContactInfo(),
+                order.getExtraInfo()
         );
     }
 }

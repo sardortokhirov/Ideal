@@ -17,10 +17,11 @@ public class PriceResponse {
     private Long toDistrictId;
     private String toDistrictName;
     private BigDecimal basePricePerSeat;
+    private BigDecimal womenDriverPricePerSeat;
     private BigDecimal premiumPricePerSeat;
     private BigDecimal frontSeatExtraFee;
     private BigDecimal otherSeatExtraFee;
-    private BigDecimal sendAloneLuggageFee;
+    private BigDecimal luggagePrice;
 
     public static PriceResponse fromEntity(Price price) {
         if (price == null) return null;
@@ -31,10 +32,11 @@ public class PriceResponse {
                 price.getToDistrict() != null ? price.getToDistrict().getId() : null,
                 price.getToDistrict() != null ? price.getToDistrict().getName() : null,
                 price.getBasePricePerSeat(),
+                price.getWomenDriverPricePerSeat(),
                 price.getPremiumPricePerSeat(),
                 price.getFrontSeatExtraFee(),
                 price.getOtherSeatExtraFee(),
-                price.getSendAloneLuggageFee()
+                price.getLuggagePrice()
         );
     }
 }

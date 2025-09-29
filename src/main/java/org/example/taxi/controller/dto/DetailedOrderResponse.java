@@ -24,10 +24,10 @@ public class DetailedOrderResponse {
     private String driverLastName;
 
     private int seats;
-    private boolean premium;
+    private OrderEntity.OrderType orderType;
     private List<String> selectedSeats;
-    private String luggageType;
-    private BigDecimal luggageFee;
+    private String luggageContactInfo;
+    private String extraInfo;
 
     private Long fromDistrictId;
     private String fromDistrictName;
@@ -38,6 +38,6 @@ public class DetailedOrderResponse {
 
     private LocalDateTime pickupTime;
     private BigDecimal totalCost;
-    private String status; // String representation of OrderStatus
+    private OrderEntity.OrderStatus status;
     private LocalDateTime createdAt;
 }

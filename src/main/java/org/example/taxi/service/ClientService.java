@@ -4,7 +4,7 @@ import org.example.taxi.controller.dto.ClientProfileRequest;
 import org.example.taxi.controller.dto.OrderBookingRequest;
 import org.example.taxi.entity.Client;
 import org.example.taxi.entity.OrderEntity;
-import org.example.taxi.entity.OrderEntity.OrderStatus; // Import enum
+import org.example.taxi.entity.OrderEntity.OrderStatus;
 import org.example.taxi.repository.ClientRepository;
 import org.example.taxi.repository.UserRepository;
 import org.slf4j.Logger;
@@ -63,6 +63,26 @@ public class ClientService {
     public OrderEntity bookRide(Long authenticatedUserId, OrderBookingRequest request) {
         request.validateDistricts();
 
+        // Validate LUGGAGE order requirements
+        if (request.getOrderType() == OrderEntity.OrderType.LUGGAGE) {
+            if (request.getLuggageContactInfo() == null || request.getLuggageContactInfo().trim().isEmpty()) {
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "LUGGAGE orders must include contact information.");
+            }
+            if (request.getSeats() != 0) {
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "LUGGAGE orders must have zero seats.");
+            }
+            if (request.getSelectedSeats() != null && !request.getSelectedSeats().isEmpty()) {
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "LUGGAGE orders cannot have selected seats.");
+            }
+        } else {
+            if (request.getSeats() <= 0) {
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Non-LUGGAGE orders must specify a positive number of seats.");
+            }
+            if (request.getLuggageContactInfo() != null) {
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Non-LUGGAGE orders cannot include contact information.");
+            }
+        }
+
         OrderEntity newOrder = new OrderEntity();
         newOrder.setFromDistrictId(request.getFromDistrictId());
         newOrder.setToDistrictId(request.getToDistrictId());
@@ -70,9 +90,10 @@ public class ClientService {
         newOrder.setToLocation(request.getToLocation());
         newOrder.setPickupTime(request.getPickupTime());
         newOrder.setSeats(request.getSeats());
-        newOrder.setPremium(request.isPremium());
+        newOrder.setOrderType(request.getOrderType());
         newOrder.setSelectedSeats(request.getSelectedSeats());
-        newOrder.setLuggageType(request.getLuggageType());
+        newOrder.setLuggageContactInfo(request.getLuggageContactInfo());
+        newOrder.setExtraInfo(request.getExtraInfo());
 
         logger.info("Client (User ID: {}) attempting to book a ride from District {} ({}) to District {} ({}).",
                 authenticatedUserId, request.getFromDistrictId(), request.getFromLocation(),
@@ -81,9 +102,8 @@ public class ClientService {
     }
 
     @Transactional(readOnly = true)
-    public List<OrderEntity> getClientRideHistory(Long authenticatedUserId, Optional<OrderStatus> status) { // CHANGED: Optional<String> to Optional<OrderStatus>
+    public List<OrderEntity> getClientRideHistory(Long authenticatedUserId, Optional<OrderStatus> status) {
         logger.info("Fetching ride history for client (User ID: {}) with status filter: {}.", authenticatedUserId, status.map(Enum::name).orElse("N/A"));
-        // The call to orderService.getClientOrderHistory is now correct as it expects Optional<OrderStatus>
         return orderService.getClientOrderHistory(authenticatedUserId, status);
     }
 

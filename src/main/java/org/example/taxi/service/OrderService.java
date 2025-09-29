@@ -33,10 +33,10 @@ public class OrderService {
     @Autowired private DistrictRepository districtRepository;
 
     private static final BigDecimal APP_FEE_PER_PERSON = BigDecimal.valueOf(20);
-    private static final BigDecimal APP_FEE_LONE_LUGGAGE = BigDecimal.valueOf(10);
+    private static final BigDecimal APP_FEE_LUGGAGE = BigDecimal.valueOf(10);
     private static final Price DEFAULT_PRICE_CONFIG = new Price(
             0L, null, null,
-            BigDecimal.valueOf(150000), BigDecimal.valueOf(200000),
+            BigDecimal.valueOf(150000), BigDecimal.valueOf(150000), BigDecimal.valueOf(200000),
             BigDecimal.valueOf(20000), BigDecimal.valueOf(10000),
             BigDecimal.valueOf(10000)
     );
@@ -47,14 +47,23 @@ public class OrderService {
         order.setCreatedAt(LocalDateTime.now());
         order.setStatus(OrderStatus.PENDING);
 
+        // Validate and set fields based on order type
+        if (order.getOrderType() == OrderEntity.OrderType.LUGGAGE) {
+            if (order.getLuggageContactInfo() == null || order.getLuggageContactInfo().trim().isEmpty()) {
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "LUGGAGE orders must include contact information.");
+            }
+            order.setSeats(0); // Ignore seats for LUGGAGE
+            order.setSelectedSeats(null); // Ignore selected seats for LUGGAGE
+        } else {
+            // For non-LUGGAGE orders (REGULAR, WOMEN_DRIVER, PREMIUM_REGULAR)
+            if (order.getSeats() <= 0) {
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Non-LUGGAGE orders must specify a positive number of seats.");
+            }
+            order.setLuggageContactInfo(null); // Clear contact info for non-LUGGAGE orders
+        }
+
         Price routePrice = getPriceForRoute(order.getFromDistrictId(), order.getToDistrictId());
         order.setTotalCost(calculateTotalCost(order, routePrice));
-
-        if ("SEND_ALONE".equals(order.getLuggageType())) {
-            order.setLuggageFee(routePrice.getSendAloneLuggageFee());
-        } else {
-            order.setLuggageFee(BigDecimal.ZERO);
-        }
 
         OrderEntity savedOrder = orderRepository.save(order);
         logger.info("New order created (ID: {}) for client {} from District {} ({}) to District {} ({}). Status: PENDING, Cost: {}.",
@@ -79,7 +88,16 @@ public class OrderService {
     }
 
     private BigDecimal calculateTotalCost(OrderEntity order, Price routePrice) {
-        BigDecimal base = order.isPremium() ? routePrice.getPremiumPricePerSeat() : routePrice.getBasePricePerSeat();
+        BigDecimal base;
+        if (order.getOrderType() == OrderEntity.OrderType.PREMIUM_REGULAR) {
+            base = routePrice.getPremiumPricePerSeat();
+        } else if (order.getOrderType() == OrderEntity.OrderType.WOMEN_DRIVER) {
+            base = routePrice.getWomenDriverPricePerSeat();
+        } else if (order.getOrderType() == OrderEntity.OrderType.LUGGAGE) {
+            return routePrice.getLuggagePrice(); // LUGGAGE orders use luggagePrice only
+        } else {
+            base = routePrice.getBasePricePerSeat();
+        }
         BigDecimal seatCost = base.multiply(BigDecimal.valueOf(order.getSeats()));
         BigDecimal selectionCost = BigDecimal.ZERO;
 
@@ -89,12 +107,41 @@ public class OrderService {
             }
         }
 
-        BigDecimal luggageCost = BigDecimal.ZERO;
-        if ("SEND_ALONE".equals(order.getLuggageType())) {
-            luggageCost = routePrice.getSendAloneLuggageFee();
+        return seatCost.add(selectionCost);
+    }
+
+    @Transactional
+    public void deductAppFee(Long orderId) {
+        OrderEntity order = orderRepository.findById(orderId)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Order not found for fee deduction."));
+
+        if (order.getDriverId() == null) {
+            logger.error("Attempted to deduct fee for order {} with no assigned driver. This should not happen for a COMPLETED order.", orderId);
+            return;
         }
 
-        return seatCost.add(selectionCost).add(luggageCost);
+        Driver driver = driverRepository.findById(order.getDriverId())
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Driver not found for fee deduction."));
+
+        BigDecimal fee = BigDecimal.ZERO;
+
+        fee = fee.add(APP_FEE_PER_PERSON.multiply(BigDecimal.valueOf(order.getSeats())));
+
+        if (order.getOrderType() == OrderEntity.OrderType.LUGGAGE) {
+            fee = fee.add(APP_FEE_LUGGAGE);
+        }
+
+        if (driver.getWalletBalance().compareTo(fee) < 0) {
+            logger.warn("Driver {} (ID: {}) has insufficient balance ({}) to cover app fee ({}). Setting wallet balance to zero and continuing.",
+                    driver.getUser().getPhoneNumber(), driver.getId(), driver.getWalletBalance(), fee);
+            driver.setWalletBalance(BigDecimal.ZERO);
+        } else {
+            driver.setWalletBalance(driver.getWalletBalance().subtract(fee));
+        }
+
+        driverRepository.save(driver);
+        logger.info("App fee of {} deducted from driver {}'s wallet for order {}. New balance: {}",
+                fee, driver.getId(), orderId, driver.getWalletBalance());
     }
 
     @Transactional(readOnly = true)
@@ -175,40 +222,6 @@ public class OrderService {
         return updatedOrder;
     }
 
-    @Transactional
-    public void deductAppFee(Long orderId) {
-        OrderEntity order = orderRepository.findById(orderId)
-                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Order not found for fee deduction."));
-
-        if (order.getDriverId() == null) {
-            logger.error("Attempted to deduct fee for order {} with no assigned driver. This should not happen for a COMPLETED order.", orderId);
-            return;
-        }
-
-        Driver driver = driverRepository.findById(order.getDriverId())
-                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Driver not found for fee deduction."));
-
-        BigDecimal fee = BigDecimal.ZERO;
-
-        fee = fee.add(APP_FEE_PER_PERSON.multiply(BigDecimal.valueOf(order.getSeats())));
-
-        if ("SEND_ALONE".equals(order.getLuggageType())) {
-            fee = fee.add(APP_FEE_LONE_LUGGAGE);
-        }
-
-        if (driver.getWalletBalance().compareTo(fee) < 0) {
-            logger.warn("Driver {} (ID: {}) has insufficient balance ({}) to cover app fee ({}). Setting wallet balance to zero and continuing.",
-                    driver.getUser().getPhoneNumber(), driver.getId(), driver.getWalletBalance(), fee);
-            driver.setWalletBalance(BigDecimal.ZERO);
-        } else {
-            driver.setWalletBalance(driver.getWalletBalance().subtract(fee));
-        }
-
-        driverRepository.save(driver);
-        logger.info("App fee of {} deducted from driver {}'s wallet for order {}. New balance: {}",
-                fee, driver.getId(), orderId, driver.getWalletBalance());
-    }
-
     @Transactional(readOnly = true)
     public OrderEntity getOrderDetails(Long orderId, Long userId, boolean isDriver) {
         OrderEntity order = orderRepository.findById(orderId)
@@ -249,7 +262,7 @@ public class OrderService {
     }
 
     @Transactional(readOnly = true)
-    public List<OrderEntity> getDriverActiveOrder(Long driverId) { // CRITICAL FIX: Returns List
+    public List<OrderEntity> getDriverActiveOrder(Long driverId) {
         List<OrderStatus> activeStatuses = List.of(OrderStatus.ACCEPTED, OrderStatus.EN_ROUTE);
         return orderRepository.findByDriverIdAndStatusIn(driverId, activeStatuses);
     }

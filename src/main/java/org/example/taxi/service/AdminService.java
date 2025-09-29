@@ -41,15 +41,11 @@ public class AdminService {
     @Autowired private OperatorService operatorService;
     @Autowired private OrderService orderService;
 
-    // Constants for app fees (must match OrderService)
     private static final BigDecimal APP_FEE_PER_PASSENGER = BigDecimal.valueOf(20);
-    private static final BigDecimal APP_FEE_LONE_LUGGAGE = BigDecimal.valueOf(10);
-    // Company's revenue share from app's collected fees
+    private static final BigDecimal APP_FEE_LUGGAGE = BigDecimal.valueOf(10);
     private static final BigDecimal COMPANY_PASSENGER_SHARE_PERCENT = BigDecimal.valueOf(0.15); // 15%
     private static final BigDecimal COMPANY_LUGGAGE_SHARE_PERCENT = BigDecimal.valueOf(1.00); // 100%
 
-
-    // --- Operator Management ---
     @Transactional
     public User createOperator(OperatorCreationRequest request) {
         if (userRepository.existsByPhoneNumber(request.getPhoneNumber())) {
@@ -69,7 +65,6 @@ public class AdminService {
         return savedOperator;
     }
 
-    // --- Pricing Configuration ---
     @Transactional
     public Price createOrUpdatePriceConfig(PriceConfigUpdate request) {
         District fromDistrict = districtRepository.findById(request.getFromDistrictId())
@@ -87,20 +82,22 @@ public class AdminService {
         if (existingPriceOpt.isPresent()) {
             price = existingPriceOpt.get();
             price.setBasePricePerSeat(request.getBasePricePerSeat());
+            price.setWomenDriverPricePerSeat(request.getWomenDriverPricePerSeat());
             price.setPremiumPricePerSeat(request.getPremiumPricePerSeat());
             price.setFrontSeatExtraFee(request.getFrontSeatExtraFee());
             price.setOtherSeatExtraFee(request.getOtherSeatExtraFee());
-            price.setSendAloneLuggageFee(request.getSendAloneLuggageFee());
+            price.setLuggagePrice(request.getLuggagePrice());
             logger.info("Updated price config for route from {} to {}.", fromDistrict.getName(), toDistrict.getName());
         } else {
             price = new Price();
             price.setFromDistrict(fromDistrict);
             price.setToDistrict(toDistrict);
             price.setBasePricePerSeat(request.getBasePricePerSeat());
+            price.setWomenDriverPricePerSeat(request.getWomenDriverPricePerSeat());
             price.setPremiumPricePerSeat(request.getPremiumPricePerSeat());
             price.setFrontSeatExtraFee(request.getFrontSeatExtraFee());
             price.setOtherSeatExtraFee(request.getOtherSeatExtraFee());
-            price.setSendAloneLuggageFee(request.getSendAloneLuggageFee());
+            price.setLuggagePrice(request.getLuggagePrice());
             logger.info("Created new price config for route from {} to {}.", fromDistrict.getName(), toDistrict.getName());
         }
 
@@ -126,8 +123,6 @@ public class AdminService {
         logger.info("Deleted price config with ID: {}", priceId);
     }
 
-    // --- Analytics and Dashboard Methods ---
-
     @Transactional(readOnly = true)
     public DashboardSummaryResponse getDashboardSummary() {
         long totalUsers = userRepository.count();
@@ -142,24 +137,23 @@ public class AdminService {
         long activeOrders = orderRepository.countByStatusIn(activeOrderStatuses);
 
         List<OrderEntity> allCompletedOrders = orderRepository.findByStatus(OrderStatus.COMPLETED);
-        BigDecimal totalAppFeesCollected = BigDecimal.ZERO; // Total fees collected by the app (from drivers)
-        BigDecimal totalCompanyRevenue = BigDecimal.ZERO; // Company's actual revenue (15% of passenger fee + 100% luggage fee)
-        BigDecimal totalDriverNetEarnings = BigDecimal.ZERO; // Driver's net earnings (what they keep)
+        BigDecimal totalAppFeesCollected = BigDecimal.ZERO;
+        BigDecimal totalCompanyRevenue = BigDecimal.ZERO;
+        BigDecimal totalDriverNetEarnings = BigDecimal.ZERO;
         BigDecimal totalClientSpending = BigDecimal.ZERO;
 
         for (OrderEntity order : allCompletedOrders) {
             BigDecimal appPassengerFee = APP_FEE_PER_PASSENGER.multiply(BigDecimal.valueOf(order.getSeats()));
-            BigDecimal appLuggageFee = "SEND_ALONE".equals(order.getLuggageType()) ? APP_FEE_LONE_LUGGAGE : BigDecimal.ZERO;
+            BigDecimal appLuggageFee = order.getOrderType() == OrderEntity.OrderType.LUGGAGE ? APP_FEE_LUGGAGE : BigDecimal.ZERO;
 
             BigDecimal orderAppFee = appPassengerFee.add(appLuggageFee);
             totalAppFeesCollected = totalAppFeesCollected.add(orderAppFee);
 
-            // Calculate company's actual revenue
             BigDecimal companyPassengerRevenue = appPassengerFee.multiply(COMPANY_PASSENGER_SHARE_PERCENT);
-            BigDecimal companyLuggageRevenue = appLuggageFee.multiply(COMPANY_LUGGAGE_SHARE_PERCENT); // 100% of app's luggage fee
+            BigDecimal companyLuggageRevenue = appLuggageFee.multiply(COMPANY_LUGGAGE_SHARE_PERCENT);
             totalCompanyRevenue = totalCompanyRevenue.add(companyPassengerRevenue).add(companyLuggageRevenue);
 
-            totalClientSpending = totalClientSpending.add(order.getTotalCost()); // Total amount client paid to driver
+            totalClientSpending = totalClientSpending.add(order.getTotalCost());
             totalDriverNetEarnings = totalDriverNetEarnings.add(order.getTotalCost().subtract(orderAppFee));
         }
 
@@ -187,7 +181,7 @@ public class AdminService {
         Map<LocalDate, BigDecimal> dailyEarnings = new HashMap<>();
         for (OrderEntity order : completedOrders) {
             BigDecimal appPassengerFee = APP_FEE_PER_PASSENGER.multiply(BigDecimal.valueOf(order.getSeats()));
-            BigDecimal appLuggageFee = "SEND_ALONE".equals(order.getLuggageType()) ? APP_FEE_LONE_LUGGAGE : BigDecimal.ZERO;
+            BigDecimal appLuggageFee = order.getOrderType() == OrderEntity.OrderType.LUGGAGE ? APP_FEE_LUGGAGE : BigDecimal.ZERO;
             BigDecimal orderAppFee = appPassengerFee.add(appLuggageFee);
             dailyEarnings.merge(order.getCreatedAt().toLocalDate(), orderAppFee, BigDecimal::add);
         }
@@ -206,7 +200,7 @@ public class AdminService {
         Map<LocalDate, BigDecimal> dailyRevenue = new HashMap<>();
         for (OrderEntity order : completedOrders) {
             BigDecimal appPassengerFee = APP_FEE_PER_PASSENGER.multiply(BigDecimal.valueOf(order.getSeats()));
-            BigDecimal appLuggageFee = "SEND_ALONE".equals(order.getLuggageType()) ? APP_FEE_LONE_LUGGAGE : BigDecimal.ZERO;
+            BigDecimal appLuggageFee = order.getOrderType() == OrderEntity.OrderType.LUGGAGE ? APP_FEE_LUGGAGE : BigDecimal.ZERO;
 
             BigDecimal companyPassengerRevenue = appPassengerFee.multiply(COMPANY_PASSENGER_SHARE_PERCENT);
             BigDecimal companyLuggageRevenue = appLuggageFee.multiply(COMPANY_LUGGAGE_SHARE_PERCENT);
@@ -238,7 +232,7 @@ public class AdminService {
         List<User> newUsers = userRepository.findByCreatedAtAfter(cutoff);
 
         Map<LocalDate, Long> dailyUserCounts = new HashMap<>();
-        for(User user : newUsers) {
+        for (User user : newUsers) {
             dailyUserCounts.merge(user.getCreatedAt().toLocalDate(), 1L, Long::sum);
         }
         return dailyUserCounts.entrySet().stream()
@@ -252,7 +246,7 @@ public class AdminService {
         LocalDateTime cutoff = LocalDateTime.now().minusDays(days.orElse(30));
         List<User> newClients = userRepository.findByUserTypeAndCreatedAtAfter(User.UserType.CLIENT, cutoff);
         Map<LocalDate, Long> dailyClientCounts = new HashMap<>();
-        for(User user : newClients) {
+        for (User user : newClients) {
             dailyClientCounts.merge(user.getCreatedAt().toLocalDate(), 1L, Long::sum);
         }
         return dailyClientCounts.entrySet().stream()
@@ -266,7 +260,7 @@ public class AdminService {
         LocalDateTime cutoff = LocalDateTime.now().minusDays(days.orElse(30));
         List<User> newDrivers = userRepository.findByUserTypeAndCreatedAtAfter(User.UserType.DRIVER, cutoff);
         Map<LocalDate, Long> dailyDriverCounts = new HashMap<>();
-        for(User user : newDrivers) {
+        for (User user : newDrivers) {
             dailyDriverCounts.merge(user.getCreatedAt().toLocalDate(), 1L, Long::sum);
         }
         return dailyDriverCounts.entrySet().stream()
@@ -279,7 +273,7 @@ public class AdminService {
     public List<ChartDataPoint> getUsersByDistrictDistribution() {
         List<User> allUsers = userRepository.findAll();
         Map<Long, Long> usersByDistrictCount = allUsers.stream()
-                .filter(user -> user.getUserType() == User.UserType.CLIENT || user.getUserType() == User.UserType.DRIVER) // Only track actual clients/drivers
+                .filter(user -> user.getUserType() == User.UserType.CLIENT || user.getUserType() == User.UserType.DRIVER)
                 .map(user -> {
                     if (user.getUserType() == User.UserType.CLIENT) {
                         return clientRepository.findByUser_Id(user.getId()).map(Client::getDistrictId).orElse(null);
@@ -307,7 +301,7 @@ public class AdminService {
     public List<ChartDataPoint> getClientsByDistrictDistribution() {
         List<Client> allClients = clientRepository.findAll();
         Map<Long, Long> clientsByDistrictCount = allClients.stream()
-                .map(Client::getDistrictId) // Assuming Client entity also has districtId or map to it
+                .map(Client::getDistrictId)
                 .filter(Objects::nonNull)
                 .collect(Collectors.groupingBy(
                         districtId -> districtId,
@@ -365,7 +359,7 @@ public class AdminService {
 
         for (OrderEntity order : allCompletedOrders) {
             BigDecimal appPassengerFee = APP_FEE_PER_PASSENGER.multiply(BigDecimal.valueOf(order.getSeats()));
-            BigDecimal appLuggageFee = "SEND_ALONE".equals(order.getLuggageType()) ? APP_FEE_LONE_LUGGAGE : BigDecimal.ZERO;
+            BigDecimal appLuggageFee = order.getOrderType() == OrderEntity.OrderType.LUGGAGE ? APP_FEE_LUGGAGE : BigDecimal.ZERO;
             BigDecimal orderAppFee = appPassengerFee.add(appLuggageFee);
 
             BigDecimal companyPassengerRevenue = appPassengerFee.multiply(COMPANY_PASSENGER_SHARE_PERCENT);
@@ -408,7 +402,6 @@ public class AdminService {
                 .map(entry -> new ChartDataPoint(districtRepository.findById(entry.getKey()).map(District::getRegion).map(Region::getName).orElse("Unknown"), entry.getValue()))
                 .sorted(Comparator.comparing(ChartDataPoint::getName))
                 .collect(Collectors.toList());
-
 
         return RevenueReportResponse.builder()
                 .totalAppEarningsAllTime(totalAppFeesCollectedAllTime)
@@ -504,7 +497,6 @@ public class AdminService {
                 .sorted(Comparator.comparing(ChartDataPoint::getName))
                 .collect(Collectors.toList());
 
-        // Users by District Distribution
         Map<Long, Long> usersByDistrictCount = new HashMap<>();
         for (User user : allUsers) {
             Long districtId = null;
@@ -522,7 +514,6 @@ public class AdminService {
                 .sorted(Comparator.comparing(ChartDataPoint::getName))
                 .collect(Collectors.toList());
 
-        // Clients by District Distribution
         Map<Long, Long> clientsByDistrictCount = clientRepository.findAll().stream()
                 .filter(client -> client.getDistrict() != null)
                 .collect(Collectors.groupingBy(Client::getDistrictId, Collectors.counting()));
@@ -531,20 +522,17 @@ public class AdminService {
                 .sorted(Comparator.comparing(ChartDataPoint::getName))
                 .collect(Collectors.toList());
 
-        // Drivers by District Distribution
         Map<Long, Long> driversByDistrictCount = driverRepository.findAll().stream()
                 .filter(driver -> driver.getDistrict() != null)
-                .collect(Collectors.groupingBy(Driver::getDistrict, Collectors.counting())) // Group by District entity
-                .entrySet().stream()
-                .collect(Collectors.toMap(
-                        entry -> entry.getKey().getId(), // Key is District ID
-                        Map.Entry::getValue // Value is count
+                .map(driver -> driver.getDistrict().getId())
+                .collect(Collectors.groupingBy(
+                        districtId -> districtId,
+                        Collectors.counting()
                 ));
         List<ChartDataPoint> driversByDistrictDistribution = driversByDistrictCount.entrySet().stream()
                 .map(entry -> new ChartDataPoint(districtRepository.findById(entry.getKey()).map(District::getName).orElse("Unknown"), entry.getValue()))
                 .sorted(Comparator.comparing(ChartDataPoint::getName))
                 .collect(Collectors.toList());
-
 
         List<DriverProfileResponse> driversPendingApproval = operatorService.getPendingDriverApprovals().stream()
                 .map(this::mapDriverToProfileResponse)
@@ -552,7 +540,6 @@ public class AdminService {
 
         List<ClientProfileResponse> latestClients = clientRepository.findAll(PageRequest.of(0, 10, Sort.by(Sort.Direction.DESC, "user.createdAt"))).getContent()
                 .stream().map(ClientProfileResponse::fromEntity).collect(Collectors.toList());
-
 
         return UserStatsResponse.builder()
                 .totalUsersCount(totalUsersCount)
@@ -580,13 +567,13 @@ public class AdminService {
         long totalPendingDrivers = allDrivers.stream().filter(d -> d.getApprovalStatus() == Driver.ApprovalStatus.PENDING).count();
         long totalRejectedDrivers = allDrivers.stream().filter(d -> d.getApprovalStatus() == Driver.ApprovalStatus.REJECTED).count();
 
-        Map<Long, BigDecimal> totalEarningsByDriverIdMap = new HashMap<>(); // Driver's net earnings from orders
+        Map<Long, BigDecimal> totalEarningsByDriverIdMap = new HashMap<>();
         Map<Long, Long> totalRidesByDistrictMap = new HashMap<>();
 
         for (OrderEntity order : completedOrders) {
             if (order.getDriverId() != null) {
                 BigDecimal appPassengerFee = APP_FEE_PER_PASSENGER.multiply(BigDecimal.valueOf(order.getSeats()));
-                BigDecimal appLuggageFee = "SEND_ALONE".equals(order.getLuggageType()) ? APP_FEE_LONE_LUGGAGE : BigDecimal.ZERO;
+                BigDecimal appLuggageFee = order.getOrderType() == OrderEntity.OrderType.LUGGAGE ? APP_FEE_LUGGAGE : BigDecimal.ZERO;
                 BigDecimal orderAppFee = appPassengerFee.add(appLuggageFee);
 
                 BigDecimal driverNetEarningForOrder = order.getTotalCost().subtract(orderAppFee);
@@ -650,20 +637,17 @@ public class AdminService {
                 .sorted(Comparator.comparing(ChartDataPoint::getName))
                 .collect(Collectors.toList());
 
-
         return DriverPerformanceResponse.builder()
                 .totalApprovedDrivers(totalApprovedDrivers)
                 .totalPendingDrivers(totalPendingDrivers)
                 .totalRejectedDrivers(totalRejectedDrivers)
-                .totalEarningsByDriver(totalEarningsByDriver) // Use List<ChartDataPoint>
+                .totalEarningsByDriver(totalEarningsByDriver)
                 .topRatedDrivers(topRatedDrivers)
                 .mostRidesDrivers(mostRidesDrivers)
-                .averageRatingByDistrict(averageRatingByDistrict) // Use List<ChartDataPoint>
-                .totalRidesByDistrict(totalRidesByDistrict) // Use List<ChartDataPoint>
+                .averageRatingByDistrict(averageRatingByDistrict)
+                .totalRidesByDistrict(totalRidesByDistrict)
                 .build();
     }
-
-    // --- Order Management Methods (for Admin/Operator pages) ---
 
     @Transactional(readOnly = true)
     public Page<DetailedOrderResponse> getOrders(OrderFilterRequest filter, Pageable pageable) {
@@ -726,17 +710,17 @@ public class AdminService {
         dto.setUserId(order.getUserId());
         dto.setDriverId(order.getDriverId());
         dto.setSeats(order.getSeats());
-        dto.setPremium(order.isPremium());
+        dto.setOrderType(order.getOrderType());
         dto.setSelectedSeats(order.getSelectedSeats());
-        dto.setLuggageType(order.getLuggageType());
-        dto.setLuggageFee(order.getLuggageFee());
+        dto.setLuggageContactInfo(order.getLuggageContactInfo());
+        dto.setExtraInfo(order.getExtraInfo());
         dto.setFromDistrictId(order.getFromDistrictId());
         dto.setToDistrictId(order.getToDistrictId());
         dto.setFromLocation(order.getFromLocation());
         dto.setToLocation(order.getToLocation());
         dto.setPickupTime(order.getPickupTime());
         dto.setTotalCost(order.getTotalCost());
-        dto.setStatus(order.getStatus().name());
+        dto.setStatus(order.getStatus());
         dto.setCreatedAt(order.getCreatedAt());
 
         if (order.getUserId() != null) {
@@ -770,14 +754,7 @@ public class AdminService {
     }
 
     @Transactional
-    public DetailedOrderResponse updateOrderStatusByAdmin(Long orderId, String newStatusString) {
-        OrderStatus newStatus;
-        try {
-            newStatus = OrderStatus.valueOf(newStatusString);
-        } catch (IllegalArgumentException e) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Invalid order status string: " + newStatusString);
-        }
-
+    public DetailedOrderResponse updateOrderStatusByAdmin(Long orderId, OrderEntity.OrderStatus newStatus) {
         OrderEntity order = orderRepository.findById(orderId)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Order not found with ID: " + orderId));
 
@@ -803,7 +780,7 @@ public class AdminService {
     }
 
     private DriverProfileResponse mapDriverToProfileResponse(Driver driver) {
-        driver.getUser(); // Ensure user is loaded if lazy
+        driver.getUser();
         return DriverProfileResponse.fromEntity(driver);
     }
 

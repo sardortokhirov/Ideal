@@ -18,6 +18,10 @@ public class PriceConfigUpdate {
     @DecimalMin(value = "0.0", inclusive = false, message = "Base price per seat must be positive.")
     private BigDecimal basePricePerSeat;
 
+    @NotNull(message = "Women driver price per seat is required.")
+    @DecimalMin(value = "0.0", inclusive = false, message = "Women driver price per seat must be positive.")
+    private BigDecimal womenDriverPricePerSeat;
+
     @NotNull(message = "Premium price per seat is required.")
     @DecimalMin(value = "0.0", inclusive = false, message = "Premium price per seat must be positive.")
     private BigDecimal premiumPricePerSeat;
@@ -30,7 +34,7 @@ public class PriceConfigUpdate {
     @DecimalMin(value = "0.0", inclusive = true, message = "Other seat extra fee cannot be negative.")
     private BigDecimal otherSeatExtraFee;
 
-    @NotNull(message = "Send alone luggage fee is required.")
-    @DecimalMin(value = "0.0", inclusive = true, message = "Send alone luggage fee cannot be negative.")
-    private BigDecimal sendAloneLuggageFee;
+    @NotNull(message = "Luggage price is required.")
+    @DecimalMin(value = "0.0", inclusive = true, message = "Luggage price cannot be negative.")
+    private BigDecimal luggagePrice;
 }

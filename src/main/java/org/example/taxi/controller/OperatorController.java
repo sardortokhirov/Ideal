@@ -129,7 +129,7 @@ public class OperatorController {
     @PutMapping("/orders/{orderId}/status")
     public ResponseEntity<OrderEntity> operatorUpdateOrderStatus(@PathVariable Long orderId, @Valid @RequestBody OrderStatusUpdateRequest request) {
         logger.info("Operator (User ID: {}) manually updating status of order {} to {}.", getAuthenticatedUserId(), orderId, request.getNewStatus());
-        OrderEntity updatedOrder = operatorService.operatorUpdateOrderStatus(orderId, request.getNewStatus().name());
+        OrderEntity updatedOrder = operatorService.operatorUpdateOrderStatus(orderId, request.getNewStatus());
         return ResponseEntity.ok(updatedOrder);
     }
 }

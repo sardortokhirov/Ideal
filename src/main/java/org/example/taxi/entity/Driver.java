@@ -34,8 +34,7 @@ public class Driver {
 
     private String passportPictureUrl;
 
-    // --- REMOVED: insuranceDocumentUrl
-    // --- REMOVED: backgroundCheckDocumentUrl
+
 
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "district_id")

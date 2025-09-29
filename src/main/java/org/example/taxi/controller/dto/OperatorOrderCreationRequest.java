@@ -7,11 +7,9 @@ import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import jakarta.annotation.Nullable;
 import jakarta.validation.constraints.Pattern;
-import jakarta.validation.constraints.Size;
 import lombok.Data;
-import org.springframework.web.multipart.MultipartFile;
+import org.example.taxi.entity.OrderEntity;
 
-import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.util.List;
 
@@ -24,16 +22,16 @@ public class OperatorOrderCreationRequest {
     @Nullable private String clientFirstName;
     @Nullable private String clientLastName;
 
-    @Min(value = 1, message = "Minimum 1 seat must be selected.")
+    @Min(value = 0, message = "Seats cannot be negative.")
     @Max(value = 4, message = "Maximum 4 seats can be selected.")
     private int seats;
 
-    private boolean premium = false;
+    @NotNull(message = "Order type is required.")
+    private OrderEntity.OrderType orderType;
 
     @Nullable private List<String> selectedSeats;
 
-    @NotBlank(message = "Luggage type is required.")
-    private String luggageType; // WITH_CLIENT, SEND_ALONE
+    @Nullable private String luggageContactInfo;
 
     @NotNull(message = "From District ID is required.")
     private Long fromDistrictId;
@@ -41,11 +39,12 @@ public class OperatorOrderCreationRequest {
     @NotNull(message = "To District ID is required.")
     private Long toDistrictId;
 
-    @Nullable // Optional String locations for operator orders
-    private String fromLocation;
+    @Nullable private String fromLocation;
 
-    @Nullable // Optional String locations for operator orders
-    private String toLocation;
+    @Nullable private  String extraInfo;
+
+
+    @Nullable private String toLocation;
 
     @NotNull(message = "Pickup time is required.")
     @FutureOrPresent(message = "Pickup time must be in the present or future.")

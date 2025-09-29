@@ -38,7 +38,6 @@ public class OperatorService {
     @Autowired private OrderService orderService;
     @Autowired private OrderRepository orderRepository;
 
-
     @Transactional(readOnly = true)
     public Page<Driver> getAllDrivers(Pageable pageable) {
         logger.info("Operator requesting all drivers with page: {}, size: {}.", pageable.getPageNumber(), pageable.getPageSize());
@@ -46,25 +45,14 @@ public class OperatorService {
     }
 
     @Transactional
-    public OrderEntity operatorUpdateOrderStatus(Long orderId, String newStatus) {
+    public OrderEntity operatorUpdateOrderStatus(Long orderId, OrderStatus newStatusEnum) {
         OrderEntity order = orderRepository.findById(orderId)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Order not found with ID: " + orderId));
 
         OrderStatus currentStatus = order.getStatus();
-        // Convert string newStatus to enum
-        OrderStatus newStatusEnum;
-        try {
-            newStatusEnum = OrderStatus.valueOf(newStatus);
-        } catch (IllegalArgumentException e) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Invalid order status string: " + newStatus);
-        }
 
-        List<OrderStatus> validStatuses = List.of(OrderStatus.PENDING, OrderStatus.ACCEPTED, OrderStatus.EN_ROUTE, OrderStatus.COMPLETED, OrderStatus.CANCELED);
-        if (!validStatuses.contains(newStatusEnum)) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Invalid order status provided: " + newStatus);
-        }
         if (currentStatus == OrderStatus.COMPLETED || currentStatus == OrderStatus.CANCELED) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Cannot update a completed or canceled order. Current status: " + currentStatus);
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Cannot update a completed or canceled order. Current status: " + currentStatus.name());
         }
 
         order.setStatus(newStatusEnum);
@@ -73,7 +61,7 @@ public class OperatorService {
         if (newStatusEnum == OrderStatus.COMPLETED) {
             orderService.deductAppFee(orderId);
         }
-        logger.info("Operator manually updated order {} status to {}. Previously: {}.", orderId, newStatus, currentStatus);
+        logger.info("Operator manually updated order {} status to {}. Previously: {}.", orderId, newStatusEnum.name(), currentStatus.name());
         return updatedOrder;
     }
 
@@ -208,6 +196,26 @@ public class OperatorService {
             logger.info("Created new client (User ID: {}) for order: {}", clientId, clientPhoneNumber);
         }
 
+        // Validate LUGGAGE order requirements
+        if (request.getOrderType() == OrderEntity.OrderType.LUGGAGE) {
+            if (request.getLuggageContactInfo() == null || request.getLuggageContactInfo().trim().isEmpty()) {
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "LUGGAGE orders must include contact information.");
+            }
+            if (request.getSeats() != 0) {
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "LUGGAGE orders must have zero seats.");
+            }
+            if (request.getSelectedSeats() != null && !request.getSelectedSeats().isEmpty()) {
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "LUGGAGE orders cannot have selected seats.");
+            }
+        } else {
+            if (request.getSeats() <= 0) {
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Non-LUGGAGE orders must specify a positive number of seats.");
+            }
+            if (request.getLuggageContactInfo() != null) {
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Non-LUGGAGE orders cannot include contact information.");
+            }
+        }
+
         OrderEntity newOrder = new OrderEntity();
         newOrder.setFromDistrictId(request.getFromDistrictId());
         newOrder.setToDistrictId(request.getToDistrictId());
@@ -215,10 +223,10 @@ public class OperatorService {
         newOrder.setToLocation(request.getToLocation());
         newOrder.setPickupTime(request.getPickupTime());
         newOrder.setSeats(request.getSeats());
-        newOrder.setPremium(request.isPremium());
+        newOrder.setOrderType(request.getOrderType());
         newOrder.setSelectedSeats(request.getSelectedSeats());
-        newOrder.setLuggageType(request.getLuggageType());
-        // luggageFee is now derived within OrderService.createOrder
+        newOrder.setLuggageContactInfo(request.getLuggageContactInfo());
+        newOrder.setExtraInfo(request.getExtraInfo());
 
         OrderEntity createdOrder = orderService.createOrder(newOrder, clientId);
 

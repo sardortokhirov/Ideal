@@ -2,6 +2,7 @@ package org.example.taxi.controller;
 
 import org.example.taxi.controller.dto.*;
 import org.example.taxi.entity.District;
+import org.example.taxi.entity.OrderEntity;
 import org.example.taxi.entity.Price;
 import org.example.taxi.entity.User;
 import org.example.taxi.repository.UserRepository;
@@ -117,7 +118,7 @@ public class AdminController {
     @PutMapping("/orders/{orderId}/status")
     public ResponseEntity<DetailedOrderResponse> updateOrderStatusByAdmin(
             @PathVariable Long orderId,
-            @RequestParam String newStatus) {
+            @RequestParam OrderEntity.OrderStatus newStatus) {
         logger.info("Admin (User ID: {}) manually updating status of order {} to {}.", getAuthenticatedUserId(), orderId, newStatus);
         return ResponseEntity.ok(adminService.updateOrderStatusByAdmin(orderId, newStatus));
     }

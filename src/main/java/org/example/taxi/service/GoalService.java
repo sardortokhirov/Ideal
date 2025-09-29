@@ -180,11 +180,9 @@ public class GoalService {
         BigDecimal totalCompanyRevenue = BigDecimal.ZERO;
         for (OrderEntity order : orders) {
             BigDecimal appPassengerFee = BigDecimal.valueOf(20).multiply(BigDecimal.valueOf(order.getSeats())); // Re-use constant
-            BigDecimal appLuggageFee = "SEND_ALONE".equals(order.getLuggageType()) ? BigDecimal.valueOf(10) : BigDecimal.ZERO; // Re-use constant
 
             BigDecimal companyPassengerRevenue = appPassengerFee.multiply(BigDecimal.valueOf(0.15)); // Re-use constant
-            BigDecimal companyLuggageRevenue = appLuggageFee.multiply(BigDecimal.valueOf(1.00)); // Re-use constant
-            totalCompanyRevenue = totalCompanyRevenue.add(companyPassengerRevenue).add(companyLuggageRevenue);
+            totalCompanyRevenue = totalCompanyRevenue.add(companyPassengerRevenue);
         }
         return totalCompanyRevenue;
     }

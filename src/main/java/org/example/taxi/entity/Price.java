@@ -28,6 +28,9 @@ public class Price {
     private BigDecimal basePricePerSeat;
 
     @Column(nullable = false)
+    private BigDecimal womenDriverPricePerSeat;
+
+    @Column(nullable = false)
     private BigDecimal premiumPricePerSeat;
 
     @Column(nullable = false)
@@ -37,9 +40,10 @@ public class Price {
     private BigDecimal otherSeatExtraFee;
 
     @Column(nullable = false)
-    private BigDecimal sendAloneLuggageFee;
+    private BigDecimal luggagePrice;
 
-    @PrePersist @PreUpdate
+    @PrePersist
+    @PreUpdate
     private void validateDistricts() {
         if (fromDistrict.equals(toDistrict)) {
             throw new IllegalArgumentException("From and To districts cannot be the same for a price route.");

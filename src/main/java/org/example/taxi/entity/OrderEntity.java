@@ -15,12 +15,14 @@ public class OrderEntity {
     private Long id;
     private Long userId; // Client ID
     private Long driverId;
+
     private int seats;
-    private boolean premium;
+
     @ElementCollection
     private List<String> selectedSeats;
-    private String luggageType; // WITH_CLIENT, SEND_ALONE
-    private BigDecimal luggageFee;
+
+    private String luggageContactInfo;
+    private String extraInfo;
 
     private Long fromDistrictId;
     private Long toDistrictId;
@@ -31,12 +33,23 @@ public class OrderEntity {
     private String toLocation;
 
     private LocalDateTime pickupTime;
+
     private BigDecimal totalCost;
+
+    @Enumerated(EnumType.STRING)
+    private OrderType orderType;
 
     @Enumerated(EnumType.STRING)
     private OrderStatus status;
 
     private LocalDateTime createdAt = LocalDateTime.now();
+
+    public enum OrderType {
+        REGULAR,
+        WOMEN_DRIVER,
+        LUGGAGE,
+        PREMIUM_REGULAR
+    }
 
     public enum OrderStatus {
         PENDING,
